@@ -6,7 +6,13 @@ export type SheetsData = Record<string, { headers: string[]; rows: SheetRows }>;
 
 function getEnv(name: string): string {
   const v = process.env[name];
-  if (!v) throw new Error(`Missing env var: ${name}`);
+  if (!v) {
+    // For published sheets, provide a default fallback
+    if (name === 'GOOGLE_SHEETS_SPREADSHEET_ID') {
+      return '2PACX-1vQFIol8mqUV0RZNQAma8swIP_ecyNrZpYTCqJ_biXF7p6JQncYM9USG8skMORWnWg';
+    }
+    throw new Error(`Missing env var: ${name}`);
+  }
   return v;
 }
 
