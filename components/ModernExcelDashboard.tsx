@@ -2,13 +2,13 @@
 
 import React, { useState, useEffect } from 'react';
 import { format } from 'date-fns';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Skeleton } from '@/components/ui/skeleton';
-import { Progress } from '@/components/ui/progress';
-import { Separator } from '@/components/ui/separator';
-import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
+import { Badge } from './ui/badge';
+import { Button } from './ui/button';
+import { Skeleton } from './ui/skeleton';
+import { Progress } from './ui/progress';
+import { Separator } from './ui/separator';
+import { Alert, AlertDescription } from './ui/alert';
 import { 
   Table, 
   TableBody, 
@@ -16,13 +16,13 @@ import {
   TableHead, 
   TableHeader, 
   TableRow 
-} from '@/components/ui/table';
+} from './ui/table';
 import { 
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger
-} from '@/components/ui/tooltip';
+} from './ui/tooltip';
 
 // Helper functions for data processing
 const EMPTY_VALUES = ['', null, undefined, 0, '0', 'N/A', 'n/a', 'na', 'NA', '-', 'null', 'undefined'];
@@ -443,10 +443,10 @@ const ExcelDashboard: React.FC<ExcelDashboardProps> = ({ data }) => {
                 <h1 className="text-xl font-bold tracking-tight bg-gradient-to-r from-gray-900 to-gray-700 bg-clip-text text-transparent">
                   Triton Food Works Masterbook
                 </h1>
-                <p className="text-sm text-muted-foreground flex items-center gap-1">
+                <div className="text-sm text-muted-foreground flex items-center gap-1">
                   <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
                   {isClient && lastUpdated ? lastUpdated : 'Loading...'}
-                </p>
+                </div>
               </div>
             </div>
             
