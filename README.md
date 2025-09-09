@@ -5,7 +5,7 @@
 [![Next.js](https://img.shields.io/badge/Next.js-14-black)](https://nextjs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-blue)](https://www.typescriptlang.org/)
 
-A modern, real-time agricultural operations dashboard that syncs with Google Sheets to provide comprehensive insights into farming activities, from sowing to revenue tracking.
+A modern, real-time agricultural operations dashboard that syncs with Google Sheets to provide comprehensive insights into farming activities, from sowing to revenue tracking. **✨ Now with live real-time updates every 30 seconds!**
 
 ## ✨ Features
 
