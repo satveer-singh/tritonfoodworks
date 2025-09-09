@@ -1,7 +1,8 @@
 /**
  * Real-Time Google Sheets Data Hook
  * 
- * Custom React hook that provides real-time data fetching from Google Sheets
+ * Custom React hook that provides real-time data fetchi      const startTime = Date.now();
+      console.log(`🔄 [useRealTimeSheetsData] ${isRefresh ? 'Refreshing' : 'Loading'} sheets data (attempt ${attempt})...`); from Google Sheets
  * with automatic refresh capabilities. This hook enables dashboard components
  * to stay synchronized with the latest data from Google Sheets.
  * 
@@ -199,6 +200,7 @@ export function useRealTimeSheetsData(options: UseRealTimeSheetsOptions = {}): S
    * Fetch data when the hook is first used
    */
   useEffect(() => {
+    console.log('🚀 [useRealTimeSheetsData] Hook initialized - starting initial data fetch');
     fetchData(false);
   }, [fetchData]);
 
@@ -208,20 +210,26 @@ export function useRealTimeSheetsData(options: UseRealTimeSheetsOptions = {}): S
    * Set up automatic refresh interval if enabled
    */
   useEffect(() => {
-    if (!enableAutoRefresh || refreshInterval <= 0) return;
+    if (!enableAutoRefresh || refreshInterval <= 0) {
+      console.log('⏸️ [useRealTimeSheetsData] Auto-refresh disabled');
+      return;
+    }
 
-    console.log(`⏰ Setting up auto-refresh every ${refreshInterval / 1000} seconds`);
+    console.log(`⏰ [useRealTimeSheetsData] Setting up auto-refresh every ${refreshInterval / 1000} seconds`);
 
     intervalRef.current = setInterval(() => {
       if (!loading && !refreshing) {
-        console.log('⏰ Auto-refresh triggered');
+        console.log('⏰ [useRealTimeSheetsData] Auto-refresh triggered');
         fetchData(true);
+      } else {
+        console.log('⏸️ [useRealTimeSheetsData] Auto-refresh skipped - already loading or refreshing');
       }
     }, refreshInterval);
 
     // Cleanup interval on unmount or dependency change
     return () => {
       if (intervalRef.current) {
+        console.log('🧹 [useRealTimeSheetsData] Cleaning up auto-refresh interval');
         clearInterval(intervalRef.current);
         intervalRef.current = null;
       }

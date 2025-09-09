@@ -728,6 +728,15 @@ export default function Home() {
    */
   const { data: sheetsData, loading, error, connectionStatus } = useRealTimeSheetsData();
 
+  // Debug logging for production troubleshooting
+  console.log('[Dashboard] Hook state:', { 
+    hasData: !!sheetsData, 
+    loading, 
+    error, 
+    connectionStatus,
+    dataKeys: sheetsData ? Object.keys(sheetsData) : []
+  });
+
   /**
    * Dashboard Data Processing
    * 
