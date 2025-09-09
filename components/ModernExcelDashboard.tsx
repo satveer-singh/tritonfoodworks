@@ -1,3 +1,24 @@
+/**
+ * Modern Excel Dashboard Component
+ * 
+ * This is the main dashboard component that provides a comprehensive
+ * view of agricultural business data. It transforms raw Google Sheets
+ * data into an interactive, visually appealing dashboard with:
+ * 
+ * 1. **Summary Cards**: Key performance indicators at-a-glance
+ * 2. **Data Tables**: Detailed views of all sheet data
+ * 3. **Visual Indicators**: Status badges, progress bars, trends
+ * 4. **Interactive Elements**: Tooltips, expandable sections
+ * 5. **Responsive Design**: Works on desktop and mobile devices
+ * 6. **Real-time Updates**: Reflects current data from Google Sheets
+ * 
+ * The component is designed to be:
+ * - User-friendly for non-technical agricultural managers
+ * - Data-driven with automatic metric calculations
+ * - Visually clear with color-coded information
+ * - Actionable with relevant business insights
+ */
+
 'use client';
 
 import React, { useState, useEffect } from 'react';
@@ -24,9 +45,33 @@ import {
   TooltipTrigger
 } from './ui/tooltip';
 
-// Helper functions for data processing
+/**
+ * Data Processing Helper Functions
+ * 
+ * These utility functions handle the complex task of processing and
+ * formatting various types of data from Google Sheets. They ensure
+ * consistent presentation and proper handling of edge cases.
+ */
+
+/**
+ * Empty Value Detection Constants
+ * 
+ * Defines all possible representations of empty or null values
+ * that might appear in Google Sheets data. This comprehensive
+ * list ensures consistent empty value handling across the app.
+ */
 const EMPTY_VALUES = ['', null, undefined, 0, '0', 'N/A', 'n/a', 'na', 'NA', '-', 'null', 'undefined'];
 
+/**
+ * Empty Value Checker
+ * 
+ * Determines if a given value should be considered empty or null.
+ * Handles various data types and string representations that
+ * commonly appear in spreadsheet data.
+ * 
+ * @param value - The value to check for emptiness
+ * @returns true if the value is considered empty, false otherwise
+ */
 function isEmptyValue(value: any): boolean {
   if (EMPTY_VALUES.includes(value)) return true;
   if (typeof value === 'string') {
@@ -36,84 +81,215 @@ function isEmptyValue(value: any): boolean {
   return false;
 }
 
+/**
+ * Amount Field Detection
+ * 
+ * Automatically detects if a data field contains financial or
+ * monetary values based on field names and content patterns.
+ * This enables automatic currency formatting and proper
+ * numeric handling for financial data.
+ * 
+ * @param key - The field/column name
+ * @param value - The field value to analyze
+ * @returns true if the field appears to contain monetary values
+ */
 function isAmountField(key: string, value: any): boolean {
+  // Keywords that commonly appear in financial field names
   const amountKeywords = ['amount', 'price', 'cost', 'revenue', 'expense', 'total', 'value', 'payment', 'salary', 'fee', 'rate', 'sum', 'perkig', 'per_kg'];
   const keyLower = key.toLowerCase();
+  
+  // Check if field name contains financial keywords
   const hasAmountKeyword = amountKeywords.some(keyword => keyLower.includes(keyword));
+  
+  // Check if value is numeric (could be financial)
   const isNumeric = !isNaN(parseFloat(value)) && isFinite(value);
+  
+  // Check if value contains currency symbols
   const hasCurrencySymbol = typeof value === 'string' && /[₹$€£¥]/.test(value);
+  
   return (hasAmountKeyword && isNumeric) || hasCurrencySymbol;
 }
 
+/**
+ * Currency Amount Formatter
+ * 
+ * Formats numeric values as currency with proper Indian Rupee
+ * symbol and number formatting. Handles various input formats
+ * including strings with existing currency symbols.
+ * 
+ * @param amount - The amount to format (number or string)
+ * @returns Formatted currency string with ₹ symbol
+ */
 function formatAmount(amount: any): string {
   if (isEmptyValue(amount)) return '₹0';
+  
+  // Clean and parse the amount value
   const numAmount = typeof amount === 'string' ? parseFloat(amount.replace(/[₹,$]/g, '')) : amount;
   if (isNaN(numAmount)) return '₹0';
+  
+  // Format with Indian number system (lakhs, crores)
   return '₹' + numAmount.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
 }
 
+/**
+ * General Number Formatter
+ * 
+ * Formats numeric values with appropriate decimal places.
+ * Preserves integers as whole numbers and limits decimals
+ * to 2 places for floating point values.
+ * 
+ * @param value - The numeric value to format
+ * @returns Formatted number string
+ */
 function formatNumber(value: any): string {
   if (typeof value !== 'number' || isNaN(value)) return value;
+  // Show integers without decimals, floats with up to 2 decimals
   return value % 1 === 0 ? value.toString() : value.toFixed(2);
 }
 
+/**
+ * Excel Date Detection
+ * 
+ * Identifies if a numeric value represents an Excel serial date.
+ * Excel stores dates as numbers where 1 = January 1, 1900.
+ * This function detects these numeric date values for proper
+ * date formatting in the dashboard.
+ * 
+ * @param value - The value to check for Excel date format
+ * @returns true if the value appears to be an Excel date
+ */
 function isExcelDate(value: any): boolean {
-  // Check both numbers and string representations of Excel dates
+  // Convert string numbers to actual numbers for checking
   const numValue = typeof value === 'string' ? parseFloat(value) : value;
+  
+  // Excel date range: roughly from 1900 to 8000+ years later
+  // 30000 ≈ 1982, 2958466 ≈ year 9999 (reasonable date range)
   return typeof numValue === 'number' && !isNaN(numValue) && numValue > 30000 && numValue < 2958466;
 }
 
+/**
+ * Date String Detection
+ * 
+ * Identifies if a string value represents a date in common formats.
+ * Supports multiple date formats commonly used in spreadsheets
+ * and validates that the string can be parsed as a valid date.
+ * 
+ * @param value - The value to check for date string format
+ * @returns true if the value is a valid date string
+ */
 function isDateString(value: any): boolean {
   if (typeof value !== 'string') return false;
+  
+  /**
+   * Common Date Format Patterns
+   * 
+   * Regular expressions that match various date formats:
+   * - MM/DD/YYYY or DD/MM/YYYY
+   * - YYYY-MM-DD (ISO format)
+   * - DD-MM-YYYY or MM-DD-YYYY
+   * - DD.MM.YYYY (European format)
+   * - YYYY/MM/DD
+   */
   const datePatterns = [
-    /^\d{1,2}\/\d{1,2}\/\d{4}$/,
-    /^\d{4}-\d{1,2}-\d{1,2}$/,
-    /^\d{1,2}-\d{1,2}-\d{4}$/,
-    /^\d{1,2}\.\d{1,2}\.\d{4}$/,
-    /^\d{4}\/\d{1,2}\/\d{1,2}$/
+    /^\d{1,2}\/\d{1,2}\/\d{4}$/,    // MM/DD/YYYY or DD/MM/YYYY
+    /^\d{4}-\d{1,2}-\d{1,2}$/,      // YYYY-MM-DD (ISO)
+    /^\d{1,2}-\d{1,2}-\d{4}$/,      // DD-MM-YYYY or MM-DD-YYYY
+    /^\d{1,2}\.\d{1,2}\.\d{4}$/,    // DD.MM.YYYY (European)
+    /^\d{4}\/\d{1,2}\/\d{1,2}$/     // YYYY/MM/DD
   ];
+  
+  // Check if string matches date pattern and can be parsed as valid date
   return datePatterns.some(pattern => pattern.test(value)) && !isNaN(Date.parse(value));
 }
 
+/**
+ * Date Formatting Function
+ * 
+ * Handles complex date formatting for various input types including
+ * Excel serial dates, date strings, and Date objects. This function
+ * is crucial for properly displaying dates from Google Sheets data.
+ * 
+ * Features:
+ * - Excel serial date conversion (handles 1900 leap year bug)
+ * - Multiple input format support
+ * - UTC timezone handling to prevent date shifting
+ * - Automatic time detection and formatting
+ * - Fallback for invalid dates
+ * 
+ * @param value - Date value in various formats (number, string, Date)
+ * @returns Formatted date string in DD MMM YYYY format
+ */
 function formatDate(value: any): string {
-  // Debug Excel date conversion
+  // Debug logging for Excel date conversion troubleshooting
   if ((typeof value === 'number' && value > 1000) || (typeof value === 'string' && parseFloat(value) > 1000)) {
     console.log(`🔧 Formatting Excel date: ${value} (type: ${typeof value})`);
   }
   
-  // Handle Excel serial date numbers correctly (both string and number formats)
-  // Excel dates start from January 1, 1900 (but Excel mistakenly treats 1900 as a leap year)
-  // Unix epoch starts from January 1, 1970
-  // The difference is 70 years + 1 day for the leap year bug = 25569 days
+  /**
+   * Excel Serial Date Conversion
+   * 
+   * Excel stores dates as serial numbers where:
+   * - 1 = January 1, 1900
+   * - Excel incorrectly treats 1900 as a leap year (has Feb 29, 1900)
+   * - Unix epoch starts January 1, 1970
+   * - Difference: 70 years + 1 day (leap year bug) = 25569 days
+   */
   let date: Date;
   if (typeof value === 'string') {
     const numValue = parseFloat(value);
     if (!isNaN(numValue) && numValue > 30000) {
-      // String representation of Excel serial date
-      // Create date in UTC to avoid timezone issues
+      /**
+       * String Representation of Excel Serial Date
+       * 
+       * Convert Excel serial number (as string) to proper Date object
+       * using UTC to avoid timezone-related date shifts
+       */
       date = new Date(Date.UTC(1970, 0, 1) + (numValue - 25569) * 86400 * 1000);
     } else {
+      // Regular date string parsing
       date = new Date(value);
     }
   } else if (typeof value === 'number') {
-    // Create date in UTC to avoid timezone issues
+    /**
+     * Numeric Excel Serial Date
+     * 
+     * Direct conversion from Excel serial number to Date object
+     * using UTC calculation to maintain consistency
+     */
     date = new Date(Date.UTC(1970, 0, 1) + (value - 25569) * 86400 * 1000);
   } else {
+    // Handle Date objects or other formats
     date = new Date(value);
   }
   
+  /**
+   * Date Validation
+   * 
+   * Check if the conversion resulted in a valid date.
+   * If not, return the original value as a string.
+   */
   if (isNaN(date.getTime())) {
     console.log(`❌ Invalid date conversion for: ${value}`);
     return String(value);
   }
   
-  // Check if the date has significant time components (ignore minor fractions)
+  /**
+   * Time Component Detection
+   * 
+   * Check if the date includes significant time information.
+   * This helps determine whether to show just date or date+time.
+   */
   const hours = date.getUTCHours();
   const minutes = date.getUTCMinutes();
   const hasTime = hours !== 0 || minutes !== 0;
   
   if (hasTime) {
-    // Format with both date and time for sorting/dispatch times
+    /**
+     * Date and Time Formatting
+     * 
+     * For dates with time components (like dispatch/delivery times),
+     * show both date and time in a readable format.
+     */
     const formattedDateTime = date.toLocaleDateString('en-GB', { 
       day: '2-digit', 
       month: 'short', 
@@ -122,13 +298,18 @@ function formatDate(value: any): string {
     }) + ' ' + date.toLocaleTimeString('en-GB', {
       hour: '2-digit',
       minute: '2-digit',
-      hour12: false,
+      hour12: false, // Use 24-hour format for clarity
       timeZone: 'UTC'
     });
     console.log(`✅ Formatted Excel date ${value} -> ${formattedDateTime}`);
     return formattedDateTime;
   } else {
-    // Format date only for harvest dates
+    /**
+     * Date-Only Formatting
+     * 
+     * For dates without significant time components (like harvest dates),
+     * show only the date in DD MMM YYYY format.
+     */
     const formattedDate = date.toLocaleDateString('en-GB', { 
       day: '2-digit', 
       month: 'short', 
@@ -140,15 +321,41 @@ function formatDate(value: any): string {
   }
 }
 
+/**
+ * Time-Based Metrics Calculator with Amount Aggregation
+ * 
+ * Calculates metrics for a specific time period including both
+ * count of records and sum of amounts. Used for time-based
+ * analysis like "last 7 days revenue" or "monthly transactions".
+ * 
+ * @param data - Array of data rows to analyze
+ * @param dateFields - Array of possible date field names
+ * @param amountFields - Array of possible amount field names
+ * @param days - Number of days to look back from current date
+ * @returns Object with count, percentage, and total amount
+ */
 function calculateTimeMetricsWithAmount(data: any[], dateFields: string[], amountFields: string[], days: number) {
+  /**
+   * Fallback for Missing Date Fields
+   * 
+   * If no date fields are available, estimate metrics based on
+   * proportional sampling. This provides approximate values when
+   * date-based filtering isn't possible.
+   */
   if (!dateFields.length) {
     const totalRecords = data.length;
-    const sampleCount = Math.floor(totalRecords / (30 / days));
+    const sampleCount = Math.floor(totalRecords / (30 / days)); // Assume 30-day data spread
     const totalAmount = calculateTotalAmount(data, amountFields);
     const sampleAmount = Math.floor(totalAmount / (30 / days));
     return { count: sampleCount, percentage: (sampleCount / totalRecords) * 100, totalAmount: sampleAmount };
   }
   
+  /**
+   * Date Range Calculation
+   * 
+   * Define the target date range for filtering records.
+   * Calculate from current date backwards by specified days.
+   */
   const currentDate = new Date();
   const targetDate = new Date(currentDate);
   targetDate.setDate(currentDate.getDate() - days);
@@ -156,6 +363,12 @@ function calculateTimeMetricsWithAmount(data: any[], dateFields: string[], amoun
   let count = 0;
   let totalAmount = 0;
   
+  /**
+   * Process Each Data Row
+   * 
+   * Check each row for date fields within the target range
+   * and sum amounts for matching records.
+   */
   data.forEach(row => {
     const isInTimeRange = dateFields.some(field => {
       if (!row[field]) return false;
@@ -197,11 +410,50 @@ function calculateTotalAmount(data: any[], amountFields: string[]): number {
   }, 0);
 }
 
+/**
+ * Excel Dashboard Component Props Interface
+ * 
+ * Defines the expected properties for the main dashboard component.
+ * Currently accepts any data structure to maintain flexibility
+ * with various Google Sheets configurations.
+ */
 interface ExcelDashboardProps {
-  data: any;
+  data: any; // Dashboard data structure from generateDynamicDashboard
 }
 
+/**
+ * Modern Excel Dashboard Component
+ * 
+ * The main dashboard component that renders the complete agricultural
+ * business intelligence interface. This component manages:
+ * 
+ * 1. **State Management**: Active sheet, loading states, visibility controls
+ * 2. **Data Processing**: Sheet filtering, record limiting, metric calculations
+ * 3. **UI Rendering**: Summary cards, data tables, visual indicators
+ * 4. **User Interactions**: Sheet navigation, record expansion, responsive behavior
+ * 5. **Real-time Updates**: Data refresh and timestamp tracking
+ * 
+ * Component Features:
+ * - Responsive design for desktop and mobile
+ * - Progressive data loading with record limits
+ * - Interactive sheet navigation
+ * - Real-time data status indicators
+ * - Comprehensive error handling and fallbacks
+ * 
+ * @param props - Component properties containing dashboard data
+ */
 const ExcelDashboard: React.FC<ExcelDashboardProps> = ({ data }) => {
+  /**
+   * Component State Management
+   * 
+   * Manage various aspects of the dashboard UI and behavior:
+   * - activeSheet: Currently selected sheet for detailed view
+   * - lastUpdated: Timestamp of last data refresh
+   * - scrollVisible: Controls scroll indicator visibility
+   * - loading: Loading state for async operations
+   * - isClient: Client-side rendering detection
+   * - showAllRecords: Per-sheet record expansion state
+   */
   const [activeSheet, setActiveSheet] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<string>('');
   const [scrollVisible, setScrollVisible] = useState(false);
@@ -209,9 +461,20 @@ const ExcelDashboard: React.FC<ExcelDashboardProps> = ({ data }) => {
   const [isClient, setIsClient] = useState(false);
   const [showAllRecords, setShowAllRecords] = useState<{[key: string]: boolean}>({});
   
-  const INITIAL_RECORDS_LIMIT = 6;
+  /**
+   * Configuration Constants
+   * 
+   * Define limits and thresholds for UI behavior
+   */
+  const INITIAL_RECORDS_LIMIT = 6; // Number of records to show initially per sheet
 
-  // Get all sheets from data
+  /**
+   * Extract Available Sheets
+   * 
+   * Filter and prepare list of available sheets from the data,
+   * excluding system sheets like 'dashboard' that aren't meant
+   * for direct user viewing.
+   */
   const sheetNames = Object.keys(data.rawData || {}).filter(
     name => name.toLowerCase() !== 'dashboard'
   );

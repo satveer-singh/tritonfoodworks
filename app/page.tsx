@@ -1,484 +1,815 @@
+/**
+ * Main Dashboard Page Component for Triton Food Works Agricultural Dashboard
+ * 
+ * This is the main entry point for the agricultural dashboard application.
+ * It provides real-time data integration from Google Sheets and renders
+ * a comprehensive dashboard interface with automatic updates.
+ * 
+ * Key Features:
+ * - Real-time Google Sheets data integration with 30-second refresh
+ * - Agricultural-specific metric calculations
+ * - Production, quality, and financial analytics
+ * - Dynamic dashboard configuration
+ * - Comprehensive error handling and fallbacks
+ * - Type-safe data processing
+ * - Client-side rendering for real-time updates
+ * 
+ * Architecture:
+ * - Client Component using custom real-time data hook
+ * - Auto-refreshing data with retry logic
+ * - Processes raw Google Sheets data into structured metrics
+ * - Generates dynamic dashboard configuration
+ * - Handles loading states and connection issues gracefully
+ * 
+ * @author Triton Food Works
+ * @version 2.0.0 - Real-time Client Component
+ */
+
+'use client';
+
+import React, { useMemo } from 'react';
 import ModernExcelDashboard from '../components/ModernExcelDashboard';
-import { getAllSheets, SheetsData } from '../lib/googleSheets';
+import { useRealTimeSheetsData } from '../lib/useRealTimeSheetsData';
 
-// Types for better type safety
+/**
+ * Production Metrics Interface
+ * 
+ * Defines the structure for agricultural production analytics.
+ * These metrics track the core production performance indicators
+ * that are critical for agricultural business operations.
+ */
 interface ProductionMetrics {
-  activeBatches: number;
-  totalExpectedYield: number;
-  totalHarvested: number;
-  harvestEfficiency: number;
+  activeBatches: number;        // Number of currently growing batches
+  totalExpectedYield: number;   // Total expected harvest quantity (kg)
+  totalHarvested: number;       // Actual harvested quantity (kg)
+  harvestEfficiency: number;    // Percentage of expected vs actual harvest
 }
 
+/**
+ * Quality Metrics Interface
+ * 
+ * Defines the structure for harvest quality and logistics performance.
+ * These metrics help track the quality control processes and
+ * delivery performance of the agricultural operation.
+ */
 interface QualityMetrics {
-  rejectionRate: number;
-  avgQualityScore: number;
-  onTimePercentage: number;
-  totalDeliveries: number;
-  onTimeDeliveries: number;
-  totalHarvested: number;
+  rejectionRate: number;        // Percentage of harvest rejected for quality
+  avgQualityScore: number;      // Average quality score (0-100)
+  onTimePercentage: number;     // Percentage of on-time deliveries
+  totalDeliveries: number;      // Total number of deliveries made
+  onTimeDeliveries: number;     // Number of on-time deliveries
+  totalHarvested: number;       // Total quantity harvested
 }
 
-interface FinancialData {
-  total: number;
-  sources: number;
-  categories: number;
-  records: number;
-  trend: 'neutral' | 'positive' | 'negative';
+/**
+ * Revenue Data Interface
+ * 
+ * Defines the structure for revenue analytics tracking all income
+ * sources and revenue performance metrics for the agricultural business.
+ */
+interface RevenueData {
+  total: number;                // Total revenue across all sources
+  sources: number;              // Number of different revenue sources
+  categories: number;           // Number of revenue categories
+  records: number;              // Total number of revenue records
+  trend: 'up' | 'down' | 'neutral'; // Revenue trend indicator
 }
 
-// Utility functions
-const cleanNumericValue = (value: any): number => {
-  if (value === null || value === undefined) return 0;
-  const cleaned = String(value).replace(/[,kg₹$]/g, '');
-  return parseFloat(cleaned) || 0;
-};
-
-const tryFieldNames = (row: any, fieldNames: string[]): number => {
-  for (const field of fieldNames) {
-    if (row[field] !== undefined) {
-      return cleanNumericValue(row[field]);
-    }
-  }
-  return 0;
-};
-
-// Agriculture-specific production metrics calculator
-function calculateProductionMetrics(sheetsData: SheetsData): ProductionMetrics {
-  const batches = sheetsData?.Batches?.rows || [];
-  const harvestLog = sheetsData?.Harvest_Log?.rows || [];
-  
-  // Log available sheets and their structures for debugging
-  console.log(`🌿 Available sheets: ${Object.keys(sheetsData).join(', ')}`);
-  
-  const activeBatches = batches.filter((row: any) => {
-    if (!row.ExpectedHarvest) return false;
-    try {
-      const expectedDate = new Date(row.ExpectedHarvest);
-      return expectedDate >= new Date(); // Not yet harvested
-    } catch {
-      return false;
-    }
-  }).length;
-  
-  // Calculate expected yield with multiple field name patterns
-  const expectedYieldFields = ['ExpectedYield(kg)', 'ExpectedYield', 'Expected Yield'];
-  const revisedYieldFields = ['RevisedYield(kg)', 'RevisedYield', 'Revised Yield'];
-  
-  const totalExpectedYield = batches.reduce((sum: number, row: any) => {
-    const expected = tryFieldNames(row, expectedYieldFields);
-    const revised = tryFieldNames(row, revisedYieldFields);
-    return sum + (revised || expected);
-  }, 0);
-  
-  // Calculate harvested quantities
-  const harvestedFields = ['QtyHarvested(kg)', 'QtyHarvested', 'Quantity Harvested', 'Harvest Qty'];
-  const totalHarvested = harvestLog.reduce((sum: number, row: any) => {
-    return sum + tryFieldNames(row, harvestedFields);
-  }, 0);
-  
-  const harvestEfficiency = totalExpectedYield > 0 
-    ? parseFloat(((totalHarvested / totalExpectedYield) * 100).toFixed(1))
-    : 0;
-  
-  return { activeBatches, totalExpectedYield, totalHarvested, harvestEfficiency };
+/**
+ * Expense Data Interface
+ * 
+ * Defines the structure for expense analytics tracking all cost
+ * categories and expense management metrics for the agricultural business.
+ */
+interface ExpenseData {
+  total: number;                // Total expenses across all categories
+  sources: number;              // Number of different expense sources
+  categories: number;           // Number of expense categories
+  records: number;              // Total number of expense records
+  trend: 'up' | 'down' | 'neutral'; // Expense trend indicator
 }
 
-// Agriculture-specific harvest quality metrics
-function calculateHarvestMetrics(sheetsData: SheetsData): QualityMetrics {
-  const harvestLog = sheetsData?.Harvest_Log?.rows || [];
-  const postHarvest = sheetsData?.Post_Harvest?.rows || [];
-  
-  const harvestedFields = ['QtyHarvested(kg)', 'QtyHarvested', 'Quantity Harvested', 'Harvest Qty'];
-  const rejectedFields = ['Rejected(kg)', 'Rejected', 'Qty Rejected'];
-  const acceptedFields = ['Accepted(kg)', 'Accepted', 'Qty Accepted'];
-  const qcFields = ['QC', 'Quality', 'QualityScore'];
-  
-  const qualityData = harvestLog.reduce((acc: any, row: any) => {
-    const harvested = tryFieldNames(row, harvestedFields);
-    const rejected = tryFieldNames(row, rejectedFields);
-    const accepted = tryFieldNames(row, acceptedFields);
-    
-    acc.totalHarvested += harvested;
-    acc.totalRejected += rejected;
-    acc.totalAccepted += accepted;
-    
-    // Quality control score
-    const qc = tryFieldNames(row, qcFields);
-    if (qc > 0) acc.qcScores.push(qc);
-    
-    return acc;
-  }, { totalHarvested: 0, totalRejected: 0, totalAccepted: 0, qcScores: [] });
-  
-  const rejectionRate = qualityData.totalHarvested > 0 
-    ? parseFloat(((qualityData.totalRejected / qualityData.totalHarvested) * 100).toFixed(1))
-    : 0;
-  
-  const avgQualityScore = qualityData.qcScores.length > 0
-    ? parseFloat((qualityData.qcScores.reduce((a: number, b: number) => a + b, 0) / qualityData.qcScores.length).toFixed(1))
-    : 0;
-  
-  // Calculate on-time deliveries
-  const onTimeDeliveries = postHarvest.filter(row => {
-    const onTimeValue = row['OnTime(0/1)'];
-    return String(onTimeValue) === '1';
-  }).length;
-  
-  const totalDeliveries = postHarvest.length;
-  const onTimePercentage = totalDeliveries > 0 
-    ? parseFloat(((onTimeDeliveries / totalDeliveries) * 100).toFixed(1))
-    : 0;
-  
-  return {
-    rejectionRate,
-    avgQualityScore,
-    onTimePercentage,
-    totalDeliveries,
-    onTimeDeliveries,
-    totalHarvested: qualityData.totalHarvested
+/**
+ * Financial Metrics Interface
+ * 
+ * Defines the structure for comprehensive financial performance metrics
+ * including profitability analysis and business health indicators.
+ */
+interface FinancialMetrics {
+  revenue: number;              // Total revenue
+  expenses: number;             // Total expenses
+  profit: number;               // Net profit (revenue - expenses)
+  profitMargin: number;         // Profit margin percentage
+  revenueStreams: number;       // Number of active revenue streams
+  expenseCategories: number;    // Number of expense categories
+}
+
+/**
+ * Operational Metrics Interface
+ * 
+ * Defines the structure for operational performance tracking including
+ * batch management, completion rates, and operational efficiency metrics.
+ */
+interface OperationalMetrics {
+  total: number;                // Total number of operations/batches
+  active: number;               // Currently active operations
+  completed: number;            // Completed operations
+  pending: number;              // Pending/scheduled operations
+  completionRate: number;       // Percentage of completed operations
+}
+
+/**
+ * Summary Card Interface
+ * 
+ * Defines the structure for dashboard summary cards that provide
+ * quick visual indicators of key business metrics and performance.
+ */
+interface SummaryCard {
+  title: string;                // Card title
+  value: number | string;       // Primary metric value
+  subtitle: string;             // Secondary information
+  type: string;                 // Card type/category
+  trend: string;                // Trend indicator
+  color: string;                // Visual color theme
+  icon: string;                 // Icon identifier
+}
+
+/**
+ * Sheet Configuration Interface
+ * 
+ * Defines the structure for Google Sheets configuration including
+ * sheet identification, data mapping, and processing parameters.
+ */
+interface SheetConfig {
+  name: string;                 // Sheet display name
+  id: string;                   // Sheet identifier
+  type: string;                 // Sheet data type/category
+  enabled: boolean;             // Whether sheet is active
+  lastUpdated: string;          // Last update timestamp
+  recordCount: number;          // Number of records in sheet
+}
+
+/**
+ * Dashboard Data Interface
+ * 
+ * Defines the complete structure for the dashboard data model including
+ * all metrics, configuration, and metadata required for rendering.
+ */
+interface DashboardData {
+  metadata: {
+    title: string;
+    totalSheets: number;
+    totalRecords: number;
+    lastUpdated: string;
+    businessType: string;
+    connectionStatus: string;
   };
+  production: ProductionMetrics;
+  quality: QualityMetrics;
+  revenue: RevenueData;
+  expenses: ExpenseData;
+  summaryCards: SummaryCard[];
+  financial: FinancialMetrics;
+  financialMetrics: FinancialMetrics;
+  operationalMetrics: OperationalMetrics;
+  sheetsConfig: SheetConfig[];
+  rawData: any;
+  sheets: any[];
 }
 
-// Enhanced sheet type detection with agriculture-specific patterns
-const SHEET_TYPE_CONFIG = {
-  'production-batches': { 
-    keywords: ['BATCH'], 
-    headers: ['BatchID', 'SownDate'],
-    color: 'green',
-    icon: '🌱'
-  },
-  'harvest-tracking': { 
-    keywords: ['HARVEST'], 
-    headers: ['QtyHarvested', 'HarvestDate'],
-    color: 'orange',
-    icon: '🌾'
-  },
-  'sourcing-procurement': { 
-    keywords: ['SOURCING', 'PROCUREMENT'], 
-    headers: ['Vendor', 'Supplier'],
-    color: 'blue',
-    icon: '🚚'
-  },
-  'post-harvest-logistics': { 
-    keywords: ['POST_HARVEST', 'POST-HARVEST'], 
-    headers: ['Sorting', 'Packaging', 'Transit'],
-    color: 'purple',
-    icon: '📦'
-  },
-  'financial-revenue': { 
-    keywords: [], 
-    headers: ['Revenue', 'Income', 'Sales'],
-    color: 'emerald',
-    icon: '💰'
-  },
-  'financial-expense': { 
-    keywords: [], 
-    headers: ['Expense', 'Cost', 'Amount'],
-    color: 'red',
-    icon: '💸'
-  },
-  'production-settings': { 
-    keywords: ['SETTINGS'], 
-    headers: ['PricePerKg', 'GermDays'],
-    color: 'gray',
-    icon: '⚙️'
-  }
-};
-
-function detectSheetType(name: string, headers: string[]): string {
-  const nameUpper = name.toUpperCase();
-  
-  for (const [type, config] of Object.entries(SHEET_TYPE_CONFIG)) {
-    const hasKeyword = config.keywords.some(keyword => nameUpper.includes(keyword));
-    const hasHeader = config.headers.some(header => 
-      headers.some(h => h && h.includes(header))
-    );
-    
-    if (hasKeyword || hasHeader) return type;
-  }
-  
-  return 'general';
-}
-
-function getSheetColor(name: string, headers: string[]): string {
-  const type = detectSheetType(name, headers);
-  return SHEET_TYPE_CONFIG[type as keyof typeof SHEET_TYPE_CONFIG]?.color || 'slate';
-}
-
-function getSheetIcon(name: string, headers: string[]): string {
-  const type = detectSheetType(name, headers);
-  return SHEET_TYPE_CONFIG[type as keyof typeof SHEET_TYPE_CONFIG]?.icon || '📄';
-}
-
-// Generate agriculture-focused summary cards
-function generateAgriculturalSummaryCards(sheetsData: SheetsData) {
-  const production = calculateProductionMetrics(sheetsData);
-  const quality = calculateHarvestMetrics(sheetsData);
-  const revenue = detectRevenueData(sheetsData);
-  const expenses = detectExpenseData(sheetsData);
-  const profit = revenue.total - expenses.total;
-  
-  const cards = [
-    {
-      title: "Total Revenue",
-      value: revenue.total,
-      subtitle: `${revenue.sources} revenue streams`,
-      type: "financial",
-      trend: 'neutral' as const,
-      color: "green",
-      icon: "TrendingUp"
-    },
-    {
-      title: "Total Expenses",
-      value: expenses.total,
-      subtitle: `${expenses.categories} expense categories`,
-      type: "financial",
-      trend: 'neutral' as const,
-      color: "red",
-      icon: "CreditCard"
-    },
-    {
-      title: "Net Profit",
-      value: profit,
-      subtitle: profit >= 0 ? "Profitable" : "Loss",
-      type: "financial",
-      trend: profit >= 0 ? 'positive' as const : 'negative' as const,
-      color: profit >= 0 ? "green" : "red",
-      icon: profit >= 0 ? "TrendingUp" : "TrendingDown"
-    },
-    {
-      title: "Active Batches",
-      value: production.activeBatches,
-      subtitle: "Currently growing",
-      type: "production",
-      trend: 'neutral' as const,
-      color: "blue",
-      icon: "Package"
-    },
-    {
-      title: "Total Harvested",
-      value: quality.totalHarvested,
-      subtitle: `${production.harvestEfficiency}% efficiency`,
-      type: "production",
-      trend: production.harvestEfficiency >= 80 ? 'positive' as const : 'neutral' as const,
-      color: "orange",
-      icon: "Truck"
-    },
-    {
-      title: "Quality Score",
-      value: quality.avgQualityScore,
-      subtitle: `${quality.rejectionRate}% rejection rate`,
-      type: "quality",
-      trend: quality.avgQualityScore >= 7 ? 'positive' as const : 'neutral' as const,
-      color: "purple",
-      icon: "Award"
-    }
-  ];
-  
-  // Add logistics performance if data available
-  if (quality.totalDeliveries > 0) {
-    cards.push({
-      title: "On-Time Delivery",
-      value: quality.onTimePercentage,
-      subtitle: `${quality.onTimeDeliveries}/${quality.totalDeliveries} deliveries`,
-      type: "logistics",
-      trend: quality.onTimePercentage >= 90 ? 'positive' as const : 'neutral' as const,
-      color: "indigo",
-      icon: "Clock"
-    });
-  }
-  
-  // Data overview
-  const totalRecords = Object.values(sheetsData).reduce((sum, sheet) => sum + sheet.rows.length, 0);
-  cards.push({
-    title: "Total Records",
-    value: totalRecords,
-    subtitle: `${Object.keys(sheetsData).length} data sheets`,
-    type: "data",
-    trend: 'neutral' as const,
-    color: "gray",
-    icon: "FileText"
-  });
-  
-  return cards;
-}
-
-// Financial data detection with agriculture context
-function detectFinancialData(sheetsData: SheetsData, isRevenue: boolean): FinancialData {
-  const searchFields = isRevenue 
-    ? ['revenue', 'income', 'sales']
-    : ['expense', 'cost', 'amount', 'outstanding'];
-  
-  let total = 0;
-  let sources = 0;
-  let categories = new Set();
-  let records = 0;
-  
-  Object.entries(sheetsData).forEach(([sheetName, sheetData]) => {
-    if (!sheetData?.rows?.length || !sheetData.headers) return;
-    
-    const relevantColumns = sheetData.headers.filter(header => 
-      header && searchFields.some(field => 
-        header.toLowerCase().includes(field) || 
-        (header.includes('₹') && (isRevenue ? header.toLowerCase().includes('revenue') : !header.toLowerCase().includes('revenue')))
-      )
-    );
-    
-    if (relevantColumns.length > 0) {
-      sources++;
-      
-      sheetData.rows.forEach((row: any) => {
-        relevantColumns.forEach(col => {
-          const value = cleanNumericValue(row[col]);
-          if (value > 0) {
-            total += value;
-            records++;
-            
-            // Categorize by available fields
-            ['Crop', 'Variety', 'Type', 'Department', 'Vendor', 'Description'].forEach(field => {
-              if (row[field]) categories.add(row[field]);
-            });
-          }
-        });
-      });
-    }
-  });
-  
-  return { total, sources, categories: categories.size, records, trend: 'neutral' };
-}
-
-function detectRevenueData(sheetsData: SheetsData): FinancialData {
-  return detectFinancialData(sheetsData, true);
-}
-
-function detectExpenseData(sheetsData: SheetsData): FinancialData {
-  return detectFinancialData(sheetsData, false);
-}
-
-// Calculate comprehensive financial metrics
-function calculateFinancialMetrics(sheetsData: SheetsData) {
-  const revenue = detectRevenueData(sheetsData);
-  const expenses = detectExpenseData(sheetsData);
-  
-  const profit = revenue.total - expenses.total;
-  const profitMargin = revenue.total > 0 ? parseFloat(((profit / revenue.total) * 100).toFixed(2)) : 0;
-  
-  return {
-    revenue: revenue.total,
-    expenses: expenses.total,
-    profit,
-    profitMargin,
-    revenueStreams: revenue.sources,
-    expenseCategories: expenses.categories
-  };
-}
-
-// Comprehensive dynamic structure generator with agriculture focus
-async function generateDynamicDashboard(sheetsData: SheetsData) {
-  const production = calculateProductionMetrics(sheetsData);
-  const quality = calculateHarvestMetrics(sheetsData);
-  const financial = calculateFinancialMetrics(sheetsData);
-  const totalRecords = Object.values(sheetsData).reduce((sum, sheet) => sum + sheet.rows.length, 0);
-  
-  return {
+/**
+ * Generate Dynamic Dashboard Configuration
+ * 
+ * This function transforms raw Google Sheets data into a structured
+ * dashboard specifically optimized for agricultural business intelligence.
+ * It processes multiple data sources and calculates meaningful metrics
+ * for production, quality, financial, and operational performance.
+ * 
+ * @param sheetsData - Raw data from Google Sheets
+ * @returns Structured dashboard data with calculated metrics
+ */
+function generateDynamicDashboard(sheetsData: any): DashboardData {
+  /**
+   * Initialize Base Dashboard Structure
+   * 
+   * Create the foundational dashboard structure with metadata
+   * and initialize all metric categories to ensure consistent
+   * data structure regardless of available sheet data.
+   */
+  const dashboardData: DashboardData = {
     metadata: {
       title: "Triton Food Works Masterbook",
-      totalSheets: Object.keys(sheetsData).length,
-      totalRecords,
+      totalSheets: 0,
+      totalRecords: 0,
       lastUpdated: new Date().toISOString(),
       businessType: 'Agriculture & Food Processing',
       connectionStatus: 'connected'
     },
-    
-    production,
-    quality,
-    revenue: detectRevenueData(sheetsData),
-    expenses: detectExpenseData(sheetsData),
-    summaryCards: generateAgriculturalSummaryCards(sheetsData),
-    financial,
-    financialMetrics: financial,
-    
-    operationalMetrics: {
-      total: totalRecords,
-      active: production.activeBatches,
-      completed: 0,
-      pending: 0,
-      completionRate: 0
-    },
-    
-    sheets: Object.entries(sheetsData).map(([name, data]) => ({
-      name,
-      type: detectSheetType(name, data.headers),
-      records: data.rows.length,
-      headers: data.headers,
-      color: getSheetColor(name, data.headers),
-      icon: getSheetIcon(name, data.headers),
-      lastRecord: data.rows.length > 0 ? data.rows[data.rows.length - 1] : null
-    })),
-    
-    sheetsConfig: Object.entries(sheetsData).map(([name, data]) => ({
-      name,
-      type: detectSheetType(name, data.headers),
-      icon: getSheetIcon(name, data.headers),
-      color: getSheetColor(name, data.headers),
-      recordCount: data.rows.length,
-      headers: data.headers,
-      keyColumns: data.headers.slice(0, 3),
-      metrics: {}
-    })),
-    
-    rawData: sheetsData
+    production: { activeBatches: 0, totalExpectedYield: 0, totalHarvested: 0, harvestEfficiency: 0 },
+    quality: { rejectionRate: 0, avgQualityScore: 0, onTimePercentage: 0, totalDeliveries: 0, onTimeDeliveries: 0, totalHarvested: 0 },
+    revenue: { total: 0, sources: 0, categories: 0, records: 0, trend: 'neutral' as const },
+    expenses: { total: 0, sources: 0, categories: 0, records: 0, trend: 'neutral' as const },
+    summaryCards: [],
+    financial: { revenue: 0, expenses: 0, profit: 0, profitMargin: 0, revenueStreams: 0, expenseCategories: 0 },
+    financialMetrics: { revenue: 0, expenses: 0, profit: 0, profitMargin: 0, revenueStreams: 0, expenseCategories: 0 },
+    operationalMetrics: { total: 0, active: 0, completed: 0, pending: 0, completionRate: 0 },
+    sheetsConfig: [],
+    rawData: sheetsData || {},
+    sheets: []
   };
+
+  // If no data available, return base structure
+  if (!sheetsData || typeof sheetsData !== 'object') {
+    return dashboardData;
+  }
+
+  /**
+   * Process Available Sheets
+   * 
+   * Iterate through all available sheets and extract metadata
+   * including sheet names, record counts, and last update times.
+   * This information is used for dashboard configuration and
+   * data freshness indicators.
+   */
+  const sheets = Object.keys(sheetsData);
+  dashboardData.metadata.totalSheets = sheets.length;
+  dashboardData.sheets = sheets;
+
+  let totalRecords = 0;
+  const sheetsConfig: SheetConfig[] = [];
+
+  /**
+   * Sheet Metadata Processing
+   * 
+   * For each sheet, extract and calculate metadata including:
+   * - Record count for capacity planning
+   * - Data freshness for quality assurance
+   * - Sheet type identification for processing logic
+   * - Enablement status for selective processing
+   */
+  sheets.forEach(sheetName => {
+    const sheetData = sheetsData[sheetName];
+    const recordCount = Array.isArray(sheetData) ? sheetData.length : 0;
+    totalRecords += recordCount;
+
+    sheetsConfig.push({
+      name: sheetName,
+      id: sheetName.toLowerCase().replace(/\s+/g, '_'),
+      type: determineSheetType(sheetName),
+      enabled: true,
+      lastUpdated: new Date().toISOString(),
+      recordCount: recordCount
+    });
+  });
+
+  dashboardData.metadata.totalRecords = totalRecords;
+  dashboardData.sheetsConfig = sheetsConfig;
+
+  /**
+   * Agricultural Production Analysis
+   * 
+   * Process production-related sheets to calculate key agricultural
+   * performance indicators including batch tracking, yield analysis,
+   * and harvest efficiency metrics.
+   */
+  const productionSheets = sheets.filter(name => 
+    name.toLowerCase().includes('production') || 
+    name.toLowerCase().includes('harvest') ||
+    name.toLowerCase().includes('batch') ||
+    name.toLowerCase().includes('crop')
+  );
+
+  if (productionSheets.length > 0) {
+    let activeBatches = 0;
+    let totalExpectedYield = 0;
+    let totalHarvested = 0;
+
+    productionSheets.forEach(sheetName => {
+      const data = sheetsData[sheetName];
+      if (Array.isArray(data)) {
+        /**
+         * Batch Status Analysis
+         * 
+         * Count active batches by identifying records with status
+         * indicating ongoing production (active, growing, in-progress).
+         * This helps track current production capacity utilization.
+         */
+        activeBatches += data.filter(row => 
+          row.status && ['active', 'growing', 'in-progress', 'ongoing'].includes(
+            String(row.status).toLowerCase()
+          )
+        ).length;
+
+        /**
+         * Yield Calculation
+         * 
+         * Sum expected and actual yield values across all production
+         * records to calculate total production capacity and actual
+         * harvest performance. Handles various field naming conventions.
+         */
+        data.forEach(row => {
+          const expectedYield = extractNumericValue(row, ['expected_yield', 'expectedYield', 'target_yield', 'planned_yield']);
+          const harvestedAmount = extractNumericValue(row, ['harvested', 'actual_yield', 'harvest_amount', 'yield']);
+          
+          totalExpectedYield += expectedYield;
+          totalHarvested += harvestedAmount;
+        });
+      }
+    });
+
+    /**
+     * Production Efficiency Calculation
+     * 
+     * Calculate harvest efficiency as the percentage of actual harvest
+     * compared to expected yield. This is a critical KPI for agricultural
+     * operations as it indicates production optimization effectiveness.
+     */
+    const harvestEfficiency = totalExpectedYield > 0 ? 
+      Math.round((totalHarvested / totalExpectedYield) * 100) : 0;
+
+    dashboardData.production = {
+      activeBatches,
+      totalExpectedYield: Math.round(totalExpectedYield),
+      totalHarvested: Math.round(totalHarvested),
+      harvestEfficiency
+    };
+  }
+
+  /**
+   * Quality Control Analysis
+   * 
+   * Process quality-related data to calculate rejection rates,
+   * quality scores, and delivery performance metrics that are
+   * critical for maintaining product standards and customer satisfaction.
+   */
+  const qualitySheets = sheets.filter(name => 
+    name.toLowerCase().includes('quality') || 
+    name.toLowerCase().includes('inspection') ||
+    name.toLowerCase().includes('delivery') ||
+    name.toLowerCase().includes('logistics')
+  );
+
+  if (qualitySheets.length > 0) {
+    let totalDeliveries = 0;
+    let onTimeDeliveries = 0;
+    let qualityScores: number[] = [];
+    let rejectedItems = 0;
+    let totalItems = 0;
+
+    qualitySheets.forEach(sheetName => {
+      const data = sheetsData[sheetName];
+      if (Array.isArray(data)) {
+        data.forEach(row => {
+          /**
+           * Delivery Performance Tracking
+           * 
+           * Track on-time delivery performance by comparing delivery
+           * status against expected delivery standards. This metric
+           * directly impacts customer satisfaction and business reputation.
+           */
+          if (row.delivery_status || row.deliveryStatus) {
+            totalDeliveries++;
+            const status = String(row.delivery_status || row.deliveryStatus).toLowerCase();
+            if (status.includes('on-time') || status.includes('ontime') || status === 'delivered') {
+              onTimeDeliveries++;
+            }
+          }
+
+          /**
+           * Quality Score Analysis
+           * 
+           * Collect quality scores from inspection records to calculate
+           * average quality performance. Quality scores help identify
+           * production issues and maintain consistency standards.
+           */
+          const qualityScore = extractNumericValue(row, ['quality_score', 'qualityScore', 'inspection_score', 'grade']);
+          if (qualityScore > 0) {
+            qualityScores.push(qualityScore);
+          }
+
+          /**
+           * Rejection Rate Calculation
+           * 
+           * Track rejected items versus total items processed to
+           * calculate rejection rate. High rejection rates indicate
+           * quality control issues that need immediate attention.
+           */
+          const rejected = extractNumericValue(row, ['rejected', 'rejection_count', 'failed_inspection']);
+          const total = extractNumericValue(row, ['total_items', 'batch_size', 'quantity']);
+          
+          rejectedItems += rejected;
+          totalItems += total;
+        });
+      }
+    });
+
+    /**
+     * Quality Metrics Compilation
+     * 
+     * Calculate comprehensive quality metrics including:
+     * - Average quality score across all inspections
+     * - Rejection rate as percentage of total production
+     * - On-time delivery percentage for logistics performance
+     */
+    const avgQualityScore = qualityScores.length > 0 ? 
+      Math.round(qualityScores.reduce((sum, score) => sum + score, 0) / qualityScores.length) : 0;
+    
+    const rejectionRate = totalItems > 0 ? 
+      Math.round((rejectedItems / totalItems) * 100) : 0;
+    
+    const onTimePercentage = totalDeliveries > 0 ? 
+      Math.round((onTimeDeliveries / totalDeliveries) * 100) : 0;
+
+    dashboardData.quality = {
+      rejectionRate,
+      avgQualityScore,
+      onTimePercentage,
+      totalDeliveries,
+      onTimeDeliveries,
+      totalHarvested: dashboardData.production.totalHarvested
+    };
+  }
+
+  /**
+   * Financial Performance Analysis
+   * 
+   * Process financial data to calculate comprehensive business
+   * performance metrics including revenue, expenses, profitability,
+   * and financial health indicators critical for business decisions.
+   */
+  const revenueSheets = sheets.filter(name => 
+    name.toLowerCase().includes('revenue') || 
+    name.toLowerCase().includes('income') ||
+    name.toLowerCase().includes('sales') ||
+    name.toLowerCase().includes('earnings')
+  );
+
+  const expenseSheets = sheets.filter(name => 
+    name.toLowerCase().includes('expense') || 
+    name.toLowerCase().includes('cost') ||
+    name.toLowerCase().includes('expenditure') ||
+    name.toLowerCase().includes('spending')
+  );
+
+  let totalRevenue = 0;
+  let revenueStreams = 0;
+  let revenueCategories = new Set<string>();
+  let revenueRecords = 0;
+
+  /**
+   * Revenue Analysis Processing
+   * 
+   * Analyze all revenue-related sheets to calculate:
+   * - Total revenue across all income sources
+   * - Number of active revenue streams
+   * - Revenue diversification metrics
+   * - Revenue trend analysis for forecasting
+   */
+  revenueSheets.forEach(sheetName => {
+    const data = sheetsData[sheetName];
+    if (Array.isArray(data)) {
+      revenueRecords += data.length;
+      
+      data.forEach(row => {
+        const amount = extractNumericValue(row, ['amount', 'revenue', 'income', 'value', 'total']);
+        const category = row.category || row.type || row.source || 'Other';
+        
+        if (amount > 0) {
+          totalRevenue += amount;
+          revenueStreams++;
+          revenueCategories.add(String(category));
+        }
+      });
+    }
+  });
+
+  let totalExpenses = 0;
+  let expenseSources = 0;
+  let expenseCategories = new Set<string>();
+  let expenseRecords = 0;
+
+  /**
+   * Expense Analysis Processing
+   * 
+   * Analyze all expense-related sheets to calculate:
+   * - Total operational costs across all categories
+   * - Number of expense sources for cost management
+   * - Expense categorization for budget optimization
+   * - Cost trend analysis for financial planning
+   */
+  expenseSheets.forEach(sheetName => {
+    const data = sheetsData[sheetName];
+    if (Array.isArray(data)) {
+      expenseRecords += data.length;
+      
+      data.forEach(row => {
+        const amount = extractNumericValue(row, ['amount', 'expense', 'cost', 'value', 'total']);
+        const category = row.category || row.type || row.source || 'Other';
+        
+        if (amount > 0) {
+          totalExpenses += amount;
+          expenseSources++;
+          expenseCategories.add(String(category));
+        }
+      });
+    }
+  });
+
+  /**
+   * Profitability Calculations
+   * 
+   * Calculate key financial performance indicators:
+   * - Net profit (revenue minus expenses)
+   * - Profit margin percentage for profitability assessment
+   * - Revenue and expense diversification metrics
+   * - Financial trend indicators for strategic planning
+   */
+  const profit = totalRevenue - totalExpenses;
+  const profitMargin = totalRevenue > 0 ? Math.round((profit / totalRevenue) * 100) : 0;
+
+  // Determine financial trends based on profit margin
+  const revenueTrend: 'up' | 'down' | 'neutral' = profitMargin > 20 ? 'up' : profitMargin < 5 ? 'down' : 'neutral';
+  const expenseTrend: 'up' | 'down' | 'neutral' = totalExpenses > totalRevenue * 0.8 ? 'up' : 'down';
+
+  dashboardData.revenue = {
+    total: Math.round(totalRevenue),
+    sources: revenueStreams,
+    categories: revenueCategories.size,
+    records: revenueRecords,
+    trend: revenueTrend
+  };
+
+  dashboardData.expenses = {
+    total: Math.round(totalExpenses),
+    sources: expenseSources,
+    categories: expenseCategories.size,
+    records: expenseRecords,
+    trend: expenseTrend
+  };
+
+  dashboardData.financial = {
+    revenue: Math.round(totalRevenue),
+    expenses: Math.round(totalExpenses),
+    profit: Math.round(profit),
+    profitMargin,
+    revenueStreams,
+    expenseCategories: expenseCategories.size
+  };
+
+  dashboardData.financialMetrics = dashboardData.financial;
+
+  /**
+   * Operational Metrics Calculation
+   * 
+   * Calculate operational performance indicators across all sheets
+   * to provide insights into operational efficiency, completion rates,
+   * and overall business operational health.
+   */
+  let totalOperations = 0;
+  let activeOperations = 0;
+  let completedOperations = 0;
+  let pendingOperations = 0;
+
+  sheets.forEach(sheetName => {
+    const data = sheetsData[sheetName];
+    if (Array.isArray(data)) {
+      data.forEach(row => {
+        if (row.status) {
+          totalOperations++;
+          const status = String(row.status).toLowerCase();
+          
+          if (['active', 'ongoing', 'in-progress', 'processing'].includes(status)) {
+            activeOperations++;
+          } else if (['completed', 'finished', 'done', 'delivered'].includes(status)) {
+            completedOperations++;
+          } else if (['pending', 'scheduled', 'planned', 'waiting'].includes(status)) {
+            pendingOperations++;
+          }
+        }
+      });
+    }
+  });
+
+  const completionRate = totalOperations > 0 ? 
+    Math.round((completedOperations / totalOperations) * 100) : 0;
+
+  dashboardData.operationalMetrics = {
+    total: totalOperations,
+    active: activeOperations,
+    completed: completedOperations,
+    pending: pendingOperations,
+    completionRate
+  };
+
+  /**
+   * Summary Cards Generation
+   * 
+   * Generate key performance indicator cards that provide quick
+   * visual insights into the most important business metrics.
+   * These cards are displayed prominently on the dashboard.
+   */
+  dashboardData.summaryCards = [
+    {
+      title: "Total Revenue",
+      value: `₹${(totalRevenue / 1000).toFixed(1)}K`,
+      subtitle: `From ${revenueStreams} sources`,
+      type: "revenue",
+      trend: revenueTrend,
+      color: "green",
+      icon: "TrendingUp"
+    },
+    {
+      title: "Active Batches",
+      value: dashboardData.production.activeBatches,
+      subtitle: `${dashboardData.production.harvestEfficiency}% efficiency`,
+      type: "production",
+      trend: dashboardData.production.harvestEfficiency > 80 ? "up" : "neutral",
+      color: "blue",
+      icon: "Leaf"
+    },
+    {
+      title: "Quality Score",
+      value: `${dashboardData.quality.avgQualityScore}%`,
+      subtitle: `${dashboardData.quality.rejectionRate}% rejection rate`,
+      type: "quality",
+      trend: dashboardData.quality.avgQualityScore > 80 ? "up" : "down",
+      color: "purple",
+      icon: "Award"
+    },
+    {
+      title: "Profit Margin",
+      value: `${profitMargin}%`,
+      subtitle: `₹${(Math.abs(profit) / 1000).toFixed(1)}K ${profit >= 0 ? 'profit' : 'loss'}`,
+      type: "financial",
+      trend: profitMargin > 15 ? "up" : profitMargin < 5 ? "down" : "neutral",
+      color: profit >= 0 ? "green" : "red",
+      icon: profit >= 0 ? "TrendingUp" : "TrendingDown"
+    }
+  ];
+
+  return dashboardData;
 }
 
-export default async function Home() {
-  try {
-    const sheetsData = await Promise.race([
-      getAllSheets(),
-      new Promise<never>((_, reject) => 
-        setTimeout(() => reject(new Error("Timeout fetching sheets data")), 15000)
-      )
-    ]) as SheetsData;
-    
-    if (!sheetsData || typeof sheetsData !== 'object' || Object.keys(sheetsData).length === 0) {
-      throw new Error("No sheets found in the Google Sheets data");
-    }
-    
-    const dashboardData = await generateDynamicDashboard(sheetsData);
-    return <ModernExcelDashboard data={dashboardData} />;
-    
-  } catch (error) {
-    console.error('❌ Error fetching data:', error instanceof Error ? error.message : String(error));
-    
-    const fallbackData = {
-      metadata: {
-        title: "Triton Food Works Masterbook",
-        totalSheets: 0,
-        totalRecords: 0,
-        lastUpdated: new Date().toISOString(),
-        businessType: 'Agriculture & Food Processing',
-        connectionStatus: 'disconnected'
-      },
-      production: { activeBatches: 0, totalExpectedYield: 0, totalHarvested: 0, harvestEfficiency: 0 },
-      quality: { rejectionRate: 0, avgQualityScore: 0, onTimePercentage: 0, totalDeliveries: 0, onTimeDeliveries: 0, totalHarvested: 0 },
-      revenue: { total: 0, sources: 0, categories: 0, records: 0, trend: 'neutral' as const },
-      expenses: { total: 0, sources: 0, categories: 0, records: 0, trend: 'neutral' as const },
-      summaryCards: [{
-        title: "Error Loading Data",
-        value: 0,
-        subtitle: "Please check connection",
-        type: "error",
-        trend: "neutral",
-        color: "red",
-        icon: "AlertCircle"
-      }],
-      financial: { revenue: 0, expenses: 0, profit: 0, profitMargin: 0, revenueStreams: 0, expenseCategories: 0 },
-      financialMetrics: { revenue: 0, expenses: 0, profit: 0, profitMargin: 0, revenueStreams: 0, expenseCategories: 0 },
-      operationalMetrics: { total: 0, active: 0, completed: 0, pending: 0, completionRate: 0 },
-      sheetsConfig: [],
-      rawData: {},
-      sheets: []
-    };
-    
-    return <ModernExcelDashboard data={fallbackData} />;
+/**
+ * Determine Sheet Type Based on Name
+ * 
+ * Analyze sheet names to categorize them into functional types
+ * for appropriate processing logic and dashboard organization.
+ * 
+ * @param sheetName - Name of the Google Sheet
+ * @returns Sheet type category for processing logic
+ */
+function determineSheetType(sheetName: string): string {
+  const name = sheetName.toLowerCase();
+  
+  if (name.includes('revenue') || name.includes('income') || name.includes('sales')) {
+    return 'revenue';
+  } else if (name.includes('expense') || name.includes('cost')) {
+    return 'expense';
+  } else if (name.includes('production') || name.includes('harvest') || name.includes('batch')) {
+    return 'production';
+  } else if (name.includes('quality') || name.includes('inspection')) {
+    return 'quality';
+  } else if (name.includes('delivery') || name.includes('logistics')) {
+    return 'logistics';
+  } else {
+    return 'general';
   }
+}
+
+/**
+ * Extract Numeric Value from Row Data
+ * 
+ * Safely extract numeric values from row data using multiple
+ * possible field names. Handles various data formats and
+ * provides fallback values for missing or invalid data.
+ * 
+ * @param row - Data row object from Google Sheets
+ * @param fieldNames - Array of possible field names to check
+ * @returns Numeric value or 0 if not found/invalid
+ */
+function extractNumericValue(row: any, fieldNames: string[]): number {
+  for (const fieldName of fieldNames) {
+    if (row[fieldName] !== undefined && row[fieldName] !== null) {
+      const value = typeof row[fieldName] === 'string' ? 
+        parseFloat(row[fieldName].replace(/[^\d.-]/g, '')) : 
+        Number(row[fieldName]);
+      
+      if (!isNaN(value) && isFinite(value)) {
+        return Math.abs(value); // Return absolute value for safety
+      }
+    }
+  }
+  return 0;
+}
+
+/**
+ * Main Dashboard Page Component
+ * 
+ * The main React component that renders the agricultural dashboard
+ * with real-time data updates, loading states, and error handling.
+ * 
+ * Features:
+ * - Real-time data fetching with 30-second intervals
+ * - Loading state management
+ * - Error handling with graceful fallbacks
+ * - Automatic dashboard data processing
+ * - Connection status monitoring
+ * 
+ * @returns JSX element containing the dashboard interface
+ */
+export default function Home() {
+  /**
+   * Real-time Data Hook
+   * 
+   * Use the custom hook to fetch Google Sheets data with automatic
+   * refresh, retry logic, and connection monitoring. This provides
+   * real-time updates to the dashboard without manual refresh.
+   */
+  const { data: sheetsData, loading, error, connectionStatus } = useRealTimeSheetsData();
+
+  /**
+   * Dashboard Data Processing
+   * 
+   * Use useMemo to process the raw sheets data into dashboard format
+   * only when the data changes. This optimization prevents unnecessary
+   * recalculations and improves performance with large datasets.
+   */
+  const dashboardData = useMemo(() => {
+    /**
+     * Data Validation Check
+     * 
+     * Verify that sheets data is available and valid before processing.
+     * If data is unavailable, return fallback structure to maintain
+     * dashboard functionality and user experience.
+     */
+    if (!sheetsData || typeof sheetsData !== 'object' || Object.keys(sheetsData).length === 0) {
+      /**
+       * Fallback Dashboard Data
+       * 
+       * Create a complete fallback dashboard structure that maintains
+       * the same interface as normal dashboard but indicates loading
+       * or connection issues to the user.
+       */
+      return {
+        metadata: {
+          title: "Triton Food Works Masterbook",
+          totalSheets: 0,
+          totalRecords: 0,
+          lastUpdated: new Date().toISOString(),
+          businessType: 'Agriculture & Food Processing',
+          connectionStatus: connectionStatus === 'connected' ? 'loading' : 'disconnected'
+        },
+        production: { activeBatches: 0, totalExpectedYield: 0, totalHarvested: 0, harvestEfficiency: 0 },
+        quality: { rejectionRate: 0, avgQualityScore: 0, onTimePercentage: 0, totalDeliveries: 0, onTimeDeliveries: 0, totalHarvested: 0 },
+        revenue: { total: 0, sources: 0, categories: 0, records: 0, trend: 'neutral' as const },
+        expenses: { total: 0, sources: 0, categories: 0, records: 0, trend: 'neutral' as const },
+        summaryCards: loading ? [
+          {
+            title: "Loading Data...",
+            value: "⏳",
+            subtitle: "Fetching latest information",
+            type: "loading",
+            trend: "neutral",
+            color: "blue",
+            icon: "RefreshCw"
+          }
+        ] : [
+          {
+            title: error ? "Connection Error" : "No Data Available",
+            value: error ? "❌" : "📊",
+            subtitle: error ? "Check internet connection" : "No sheets data found",
+            type: "error",
+            trend: "neutral",
+            color: error ? "red" : "gray",
+            icon: error ? "AlertCircle" : "Database"
+          }
+        ],
+        financial: { revenue: 0, expenses: 0, profit: 0, profitMargin: 0, revenueStreams: 0, expenseCategories: 0 },
+        financialMetrics: { revenue: 0, expenses: 0, profit: 0, profitMargin: 0, revenueStreams: 0, expenseCategories: 0 },
+        operationalMetrics: { total: 0, active: 0, completed: 0, pending: 0, completionRate: 0 },
+        sheetsConfig: [],
+        rawData: {},
+        sheets: []
+      };
+    }
+
+    /**
+     * Process Valid Data
+     * 
+     * When valid sheets data is available, process it through the
+     * dynamic dashboard generation function to create comprehensive
+     * agricultural metrics and dashboard configuration.
+     */
+    return generateDynamicDashboard(sheetsData);
+  }, [sheetsData, loading, error, connectionStatus]);
+
+  /**
+   * Render Dashboard Component
+   * 
+   * Render the ModernExcelDashboard component with processed data.
+   * The dashboard will automatically update when new data arrives
+   * from the real-time data hook, providing live business intelligence.
+   */
+  return <ModernExcelDashboard data={dashboardData} />;
 }
